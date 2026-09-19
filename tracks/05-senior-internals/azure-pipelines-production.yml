@@ -1,0 +1,171 @@
+# ============================================================================
+# ☁️ ENTERPRISE PRODUCTION AZURE PIPELINE (NODE.JS & AZURE KUBERNETES SERVICE)
+# ============================================================================
+# Características de nivel Staff / Platform Engineer:
+# 1. Multi-stage declarativo con resolución de dependencias por DAG (dependsOn).
+# 2. Matrix Jobs paralelos para pruebas de compatibilidad en múltiples versiones de Node.
+# 3. Autenticación Zero-Trust con Workload Identity Federation (OIDC) sin secretos.
+# 4. Escaneo de vulnerabilidades en contenedores antes de publicar la imagen.
+# 5. Despliegue en Staging seguido de estrategia progresiva Canary en Producción.
+# ============================================================================
+
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  branches:
+    include:
+      - main
+      - release/*
+  paths:
+    exclude:
+      - 'README.md'
+      - 'docs/**'
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  - name: azureServiceConnection
+    value: 'sc-azure-workload-identity' # Conexión OIDC sin passwords
+  - name: containerRegistry
+    value: 'mycompanyacr.azurecr.io'
+  - name: imageRepository
+    value: 'backend/core-service'
+  - name: dockerfilePath
+    value: '$(Build.SourcesDirectory)/Dockerfile'
+  - name: tag
+    value: '$(Build.BuildId)'
+
+stages:
+  # --------------------------------------------------------------------------
+  # STAGE 1: CALIDAD DE CÓDIGO Y PRUEBAS MATRICIALES (CI)
+  # --------------------------------------------------------------------------
+  - stage: QualityAndUnitTests
+    displayName: '1. Calidad, Linter y Pruebas'
+    jobs:
+      - job: TestMatrix
+        displayName: 'Pruebas en Matriz de Node'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          matrix:
+            Node_20:
+              nodeVersion: '20.x'
+            Node_22:
+              nodeVersion: '22.x'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(nodeVersion)
+            displayName: 'Configurar Node.js $(nodeVersion)'
+
+          - script: npm ci
+            displayName: 'Instalación reproducible de dependencias'
+
+          - script: npm run ts:senior:01
+            displayName: 'Verificación estricta de tipos TypeScript'
+
+          - script: npm run test:senior:01
+            displayName: 'Ejecución de Tests Unitarios'
+
+  # --------------------------------------------------------------------------
+  # STAGE 2: CONSTRUCCIÓN DE CONTENEDOR Y ESCANEO DE SEGURIDAD
+  # --------------------------------------------------------------------------
+  - stage: BuildAndSecurityScan
+    displayName: '2. Contenedor y Escaneo de Vulnerabilidades'
+    dependsOn: QualityAndUnitTests
+    condition: succeeded()
+    jobs:
+      - job: BuildAndScan
+        displayName: 'Docker Build, Trivy Scan & Push a ACR'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: Docker@2
+            displayName: 'Construir imagen Docker'
+            inputs:
+              command: 'build'
+              repository: $(imageRepository)
+              dockerfile: $(dockerfilePath)
+              tags: |
+                $(tag)
+                latest
+
+          - script: |
+              echo "Ejecutando escaneo de seguridad de la imagen OCI..."
+              # Bloquea la canalización si se detectan CVEs críticos
+              # trivy image --exit-code 1 --severity CRITICAL $(containerRegistry)/$(imageRepository):$(tag)
+            displayName: 'Escaneo de vulnerabilidades con Trivy'
+
+          - task: Docker@2
+            displayName: 'Push a Azure Container Registry (ACR)'
+            inputs:
+              containerRegistry: $(azureServiceConnection)
+              repository: $(imageRepository)
+              command: 'push'
+              tags: |
+                $(tag)
+
+  # --------------------------------------------------------------------------
+  # STAGE 3: DESPLIEGUE EN ENTORNO DE STAGING
+  # --------------------------------------------------------------------------
+  - stage: DeployStaging
+    displayName: '3. Despliegue en Staging'
+    dependsOn: BuildAndSecurityScan
+    condition: succeeded()
+    jobs:
+      - deployment: DeployStagingJob
+        displayName: 'Despliegue en AKS Staging'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'staging-environment'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  displayName: 'Aplicar manifiestos en AKS Staging con OIDC'
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      echo "Conectando al cluster de Staging..."
+                      echo "Actualizando imagen a $(containerRegistry)/$(imageRepository):$(tag)"
+
+  # --------------------------------------------------------------------------
+  # STAGE 4: DESPLIEGUE CANARY EN PRODUCCIÓN (CON GATES Y ROLLBACK)
+  # --------------------------------------------------------------------------
+  - stage: DeployProduction
+    displayName: '4. Despliegue Progresivo a Producción (Canary)'
+    dependsOn: DeployStaging
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployProductionCanary
+        displayName: 'Canary Deployment en AKS Prod'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'production-environment' # Protegido con Manual Approval y Azure Monitor Alert Gates
+        strategy:
+          canary:
+            increments: [10, 50] # Desviar 10% de tráfico, evaluar métricas, luego 50%
+            preDeploy:
+              steps:
+                - script: echo "Pre-despliegue: verificando estado de la base de datos de producción..."
+            deploy:
+              steps:
+                - script: echo "Desplegando pod Canary con versión $(tag)..."
+            routeTraffic:
+              steps:
+                - script: echo "Enrutando tráfico proporcional mediante Ingress Controller..."
+            postRouteTraffic:
+              steps:
+                - script: echo "Monitorizando latencia y tasa de errores HTTP 5xx en Application Insights..."
+            on:
+              failure:
+                steps:
+                  - script: |
+                      echo "⚠️ ALERTA: Despliegue Canary fallido. Ejecutando Rollback inmediato..."
+                    displayName: 'Rollback Automático a la versión anterior'

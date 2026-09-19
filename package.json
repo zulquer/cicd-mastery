@@ -1,0 +1,13 @@
+{
+  "name": "cicd-mastery",
+  "version": "1.0.0",
+  "description": "Ruta de Maestría Senior & Staff en CI/CD, GitOps, Pipelines Universales y Estrategias de Despliegue",
+  "type": "module",
+  "scripts": {
+    "cicd:senior:01": "tsx tracks/05-senior-internals/01-pipeline-dag-and-matrix-simulator.ts",
+    "cicd:senior:02": "tsx tracks/05-senior-internals/02-canary-traffic-router-and-rollback.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.13"
+  }
+}
