@@ -2,6 +2,16 @@
 
 Repositorio maestro de referencia técnica profunda para dominar **Integración Continua (CI), Entrega Continua (CD), GitOps, Estrategias de Despliegue en Producción y Seguridad de la Cadena de Suministro (Supply Chain Security)** a nivel **Senior / Staff / Platform Engineer**.
 
+---
+
+## 🎯 Preguntas de Entrevista Técnica
+
+Para preparar entrevistas técnicas de alto nivel (**Senior DevOps, SRE, Platform Engineer y CI/CD Specialist**), este módulo incluye la guía:
+
+👉 **[Las 100 Preguntas Más Comunes en Entrevistas Técnicas: CI/CD & Delivery Engineering](./INTERVIEW-QUESTIONS.md)** (DAGs, Matrices, Canary, Blue-Green, SLSA Level 3, SBOM, OIDC Keyless, GitOps ArgoCD/Flux, Métricas DORA, con criterios 🚩 *Red Flags* vs 🟢 *Green Flags*).
+
+---
+
 ## 🌐 The Mastery Suite (Ecosistema Modular)
 
 | Repositorio | Especialidad Técnica | Enlace |
